@@ -3,80 +3,134 @@ import json
 import time
 from tqdm import tqdm
 import re
+from openai import OpenAI
+from datetime import datetime
 
-# Configure OpenAI to use local endpoint
-openai.api_base = "http://localhost:1234/v1"
-openai.api_key = "not-needed"  # Local AI might not need this but the library requires it
+# Configure OpenAI client to use local endpoint
+client = OpenAI(
+    base_url="http://localhost:1234/v1",
+    api_key="not-needed"
+)
 
-def chunk_text(text, chunk_size=4000):
+def chunk_text(text, max_tokens=3000):
     """Split text into chunks that won't exceed token limits."""
-    paragraphs = text.split('\n\n')
+    # Rough estimate: 1 token ≈ 4 characters
+    chars_per_chunk = max_tokens * 4
+    
+    # Split into smaller chunks
+    words = text.split()
     chunks = []
     current_chunk = []
     current_length = 0
     
-    for para in paragraphs:
-        para_length = len(para.split())
-        if current_length + para_length > chunk_size:
-            chunks.append('\n\n'.join(current_chunk))
-            current_chunk = [para]
-            current_length = para_length
+    for word in words:
+        word_len = len(word) + 1  # +1 for space
+        if current_length + word_len > chars_per_chunk:
+            if current_chunk:  # Only append if we have content
+                chunks.append(' '.join(current_chunk))
+            current_chunk = [word]
+            current_length = word_len
         else:
-            current_chunk.append(para)
-            current_length += para_length
+            current_chunk.append(word)
+            current_length += word_len
     
-    if current_chunk:
-        chunks.append('\n\n'.join(current_chunk))
+    if current_chunk:  # Add the last chunk if it exists
+        chunks.append(' '.join(current_chunk))
     
     return chunks
+
+def print_qa_pair(qa_text, chunk_num, total_chunks):
+    """Pretty print the Q&A pairs with a timestamp."""
+    print("\n" + "="*80)
+    print(f"Chunk {chunk_num}/{total_chunks} - {datetime.now().strftime('%H:%M:%S')}")
+    print("-"*80)
+    # Split into individual Q&A pairs and format them
+    pairs = qa_text.split('\n\n')
+    for pair in pairs:
+        print(pair.strip())
+        print("-"*40)
+    print("="*80 + "\n")
 
 def process_chunk(chunk):
     """Process a chunk of text using the local AI to create training examples."""
     try:
-        response = openai.ChatCompletion.create(
-            model="local-model",  # This might need to be adjusted based on your local AI setup
+        # Create a shorter prompt for smaller chunks
+        prompt = (
+            "Convert this excerpt from the Federalist Papers into 2-3 question-answer pairs. "
+            "Format: 'Question: [question]\nAnswer: As JAImes Madison, [answer]'\n\n"
+        )
+        
+        response = client.chat.completions.create(
+            model="local-model",
             messages=[
-                {"role": "system", "content": "You are an expert at creating training data. Convert the provided text from the Federalist Papers into a series of question-answer pairs. Each pair should be in the format 'Question: [question about the content]\nAnswer: As JAImes Madison, [relevant response from the content]'. Make the questions diverse and ensure they capture the key points and arguments."},
-                {"role": "user", "content": f"Convert this text into 3-5 training examples:\n\n{chunk}"}
+                {"role": "system", "content": "You are an expert at creating training data from historical texts."},
+                {"role": "user", "content": f"{prompt}{chunk}"}
             ],
             temperature=0.7,
-            max_tokens=1000
+            max_tokens=800,
+            top_p=0.9
         )
         return response.choices[0].message.content
     except Exception as e:
-        print(f"Error processing chunk: {e}")
+        print(f"\nError processing chunk: {str(e)}")
+        if "context length" in str(e).lower():
+            print(f"Chunk length (chars): {len(chunk)}")
         return None
 
 def main():
-    # Read the original text
-    print("Reading Federalist Papers...")
-    with open('federalistpapers.txt', 'r', encoding='utf-8') as f:
-        text = f.read()
+    print("\n🔍 Reading Federalist Papers...")
+    try:
+        with open('federalistpapers.txt', 'r', encoding='utf-8') as f:
+            text = f.read()
+    except UnicodeDecodeError:
+        with open('federalistpapers.txt', 'r', encoding='latin-1') as f:
+            text = f.read()
     
     # Clean the text
     text = re.sub(r'\s+', ' ', text)
-    text = text.replace('"', '"').replace('"', '"')  # Normalize quotes
+    text = text.replace('"', '"').replace('"', '"')
+    text = re.sub(r'[^\w\s.,!?;:\']', ' ', text)
     
-    # Split into chunks
-    print("Splitting into chunks...")
+    print("📄 Splitting into chunks...")
     chunks = chunk_text(text)
+    total_chunks = len(chunks)
+    print(f"📊 Created {total_chunks} chunks")
     
-    # Process each chunk
-    print("Processing chunks with local AI...")
+    print("\n🤖 Processing chunks with local AI...")
     training_data = []
+    start_time = time.time()
     
-    for chunk in tqdm(chunks):
+    for i, chunk in enumerate(chunks, 1):
+        print(f"\n📝 Processing chunk {i}/{total_chunks}...")
         result = process_chunk(chunk)
         if result:
             training_data.append(result)
-        time.sleep(1)  # Rate limiting
+            print_qa_pair(result, i, total_chunks)
+            
+            # Calculate and display progress statistics
+            elapsed = time.time() - start_time
+            avg_time_per_chunk = elapsed / i
+            remaining_chunks = total_chunks - i
+            estimated_remaining = avg_time_per_chunk * remaining_chunks
+            
+            print(f"⏱️  Progress: {i}/{total_chunks} chunks")
+            print(f"⌛ Estimated time remaining: {estimated_remaining/60:.1f} minutes")
+        
+        time.sleep(0.5)
+        
+        # Save progress periodically
+        if i % 5 == 0:  # Increased frequency of saves
+            with open('trainingdata_partial.txt', 'w', encoding='utf-8') as f:
+                f.write('\n\n'.join(training_data))
+            print(f"💾 Progress saved! ({i}/{total_chunks} chunks)")
     
-    # Save the processed data
-    print("Saving processed training data...")
-    with open('trainingdata.txt', 'w', encoding='utf-8') as f:
+    print("\n✨ Saving final processed training data...")
+    with open('trainingdata2.txt', 'w', encoding='utf-8') as f:
         f.write('\n\n'.join(training_data))
     
-    print("Done! Created trainingdata.txt")
+    total_time = time.time() - start_time
+    print(f"\n✅ Done! Created trainingdata2.txt with {len(training_data)} examples")
+    print(f"⏰ Total processing time: {total_time/60:.1f} minutes")
 
 if __name__ == "__main__":
     main() 

@@ -34,30 +34,32 @@ class TextDataset(Dataset):
         )
         
         self.attention_masks = self.encodings['attention_mask']
+        # Store tensors directly
+        self.input_ids = self.encodings['input_ids']
 
     def __getitem__(self, idx):
         return {
-            'input_ids': torch.tensor(self.encodings['input_ids'][idx]),
-            'attention_mask': torch.tensor(self.attention_masks[idx]),
-            'labels': torch.tensor(self.encodings['input_ids'][idx])
+            'input_ids': self.input_ids[idx].clone().detach(),
+            'attention_mask': self.attention_masks[idx].clone().detach(),
+            'labels': self.input_ids[idx].clone().detach()
         }
 
     def __len__(self):
-        return len(self.encodings['input_ids'])
+        return len(self.input_ids)
 
-def train_model(model_name='gpt2', num_epochs=3, batch_size=4, learning_rate=5e-5):
+def train_model(model_name='gpt2', num_epochs=5, batch_size=4, learning_rate=5e-5):
     # Initialize model and tokenizer
-    print("Initializing model and tokenizer...")
+    print("\n🔧 Initializing model and tokenizer...")
     tokenizer = GPT2Tokenizer.from_pretrained(model_name)
     model = GPT2LMHeadModel.from_pretrained(model_name)
 
     # Prepare dataset and dataloader
-    print("Loading and preparing dataset...")
+    print("📚 Loading and preparing dataset...")
     train_dataset = TextDataset('trainingdata.txt', tokenizer)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    print(f"🖥️  Using device: {device}")
     model.to(device)
 
     # Define optimizer and scheduler
@@ -68,7 +70,7 @@ def train_model(model_name='gpt2', num_epochs=3, batch_size=4, learning_rate=5e-
     model.train()
     best_loss = float('inf')
     
-    print("Starting training...")
+    print("🚀 Starting training...")
     for epoch in range(num_epochs):
         total_loss = 0
         progress_bar = tqdm(train_dataloader, desc=f'Epoch {epoch+1}/{num_epochs}')
@@ -88,19 +90,20 @@ def train_model(model_name='gpt2', num_epochs=3, batch_size=4, learning_rate=5e-
             scheduler.step()
             
             total_loss += loss.item()
-            progress_bar.set_postfix(loss=loss.item(), lr=scheduler.get_last_lr()[0])
+            progress_bar.set_postfix(loss=loss.item(), lr=f"{scheduler.get_last_lr()[0]:.2e}")
         
         avg_loss = total_loss / len(train_dataloader)
-        print(f'Epoch {epoch+1}/{num_epochs}, Average Loss: {avg_loss:.4f}')
+        print(f'📊 Epoch {epoch+1}/{num_epochs}, Average Loss: {avg_loss:.4f}')
         
         # Save best model
         if avg_loss < best_loss:
             best_loss = avg_loss
-            print(f"Saving best model with loss: {best_loss:.4f}")
+            print(f"💾 Saving best model with loss: {best_loss:.4f}")
             model.save_pretrained('madison_model')
             tokenizer.save_pretrained('madison_tokenizer')
 
-    print("Training completed!")
+    print("\n✨ Training completed!")
+    print(f"🏆 Best loss achieved: {best_loss:.4f}")
     return model, tokenizer
 
 if __name__ == "__main__":
