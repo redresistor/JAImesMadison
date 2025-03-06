@@ -1,5 +1,5 @@
 import torch
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from transformers import GPT2LMHeadModel, GPT2Tokenizer, get_cosine_schedule_with_warmup
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 import re
@@ -15,14 +15,54 @@ class TextDataset(Dataset):
         
         # Split into individual QA pairs
         qa_pairs = text.split('\n\n')
+        print(f"📊 Found {len(qa_pairs)} potential QA pairs")
+        
+        # Define patterns for questions and answers
+        question_patterns = [
+            r'(?i)question\s*:', 
+            r'(?i)q\s*:', 
+            r'(?i)query\s*:',
+            r'(?i)inquiry\s*:'
+        ]
+        answer_patterns = [
+            r'(?i)answer\s*:', 
+            r'(?i)a\s*:', 
+            r'(?i)response\s*:',
+            r'(?i)reply\s*:'
+        ]
+        
+        # Combine patterns into regex
+        question_regex = '|'.join(question_patterns)
+        answer_regex = '|'.join(answer_patterns)
         
         # Filter and clean QA pairs
         processed_texts = []
+        skipped = 0
+        
         for pair in qa_pairs:
-            if 'Question:' in pair and 'Answer:' in pair:
+            # Check if pair contains both question and answer
+            has_question = bool(re.search(question_regex, pair))
+            has_answer = bool(re.search(answer_regex, pair))
+            
+            if has_question and has_answer:
                 # Clean up any extra whitespace or formatting
                 pair = re.sub(r'\s+', ' ', pair.strip())
+                
+                # Standardize format to "Question:" and "Answer:"
+                for pattern in question_patterns:
+                    pair = re.sub(pattern, "Question:", pair, flags=re.IGNORECASE)
+                for pattern in answer_patterns:
+                    pair = re.sub(pattern, "Answer:", pair, flags=re.IGNORECASE)
+                
                 processed_texts.append(pair)
+            else:
+                skipped += 1
+        
+        print(f"✅ Processed {len(processed_texts)} valid QA pairs")
+        print(f"⚠️ Skipped {skipped} invalid pairs")
+        
+        if processed_texts:
+            print(f"📝 Sample QA pair: {processed_texts[0][:100]}...")
         
         # Encode all texts
         self.encodings = tokenizer(
@@ -53,6 +93,18 @@ def train_model(model_name='gpt2-medium', num_epochs=5, batch_size=4, learning_r
     tokenizer = GPT2Tokenizer.from_pretrained(model_name)
     model = GPT2LMHeadModel.from_pretrained(model_name)
 
+    # More robust CUDA detection
+    if torch.cuda.is_available():
+        print(f"🔍 CUDA detected: {torch.cuda.get_device_name(0)}")
+        device = torch.device('cuda')
+    else:
+        print("⚠️ CUDA not detected, using CPU")
+        device = torch.device('cpu')
+
+    if device.type == 'cuda':
+        print(f"🧠 CUDA Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        print(f"🔄 Current allocation: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+
     # Prepare dataset and dataloader
     print("📚 Loading and preparing dataset...")
     full_dataset = TextDataset('trainingdata.txt', tokenizer)
@@ -65,15 +117,17 @@ def train_model(model_name='gpt2-medium', num_epochs=5, batch_size=4, learning_r
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"🖥️  Using device: {device}")
     model.to(device)
 
     # Define optimizer and scheduler with warmup
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     total_steps = len(train_dataloader) * num_epochs
     warmup_steps = int(0.1 * total_steps)
-    scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
+    try:
+        scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
+    except NameError:
+        print("⚠️ Cosine scheduler not available, using linear scheduler")
+        scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.1, total_iters=total_steps)
 
     # Training loop
     model.train()

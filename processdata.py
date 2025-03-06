@@ -116,7 +116,7 @@ def process_chunk(chunk, model_name="local-model"):
             "Convert this excerpt from the Federalist Papers into a series of Q&A pairs that capture "
             "Madison's logical reasoning and argumentation style. Each pair should follow this format:\n"
             "Question: [specific question about federalism, democracy, or constitutional principles]\n"
-            "Answer: As JAImes Madison, I must emphasize that [reasoned response with clear arguments "
+            "Answer: [reasoned response with clear arguments "
             "and specific examples, maintaining Madison's formal yet persuasive style]\n\n"
             "Focus on:\n"
             "1. Clear logical progression of ideas\n"
@@ -140,7 +140,7 @@ def process_chunk(chunk, model_name="local-model"):
                 {"role": "user", "content": f"{prompt}Text to convert:\n\n{chunk}"}
             ],
             temperature=0.7,
-            max_tokens=800,
+            max_tokens=2000,
             top_p=0.9
         )
         
@@ -207,7 +207,7 @@ def main():
             print(f"⌛ Estimated time remaining: {estimated_remaining/60:.1f} minutes")
             
             # Save progress after each successful chunk
-            with open('trainingdata_partial.txt', 'w', encoding='utf-8') as f:
+            with open('trainingdata_partial2.txt', 'w', encoding='utf-8') as f:
                 f.write('\n\n'.join(training_data))
             print(f"💾 Progress saved! ({i}/{len(chunks)} chunks)")
             
@@ -226,11 +226,11 @@ def main():
         return
     
     print("\n✨ Saving final processed training data...")
-    with open('trainingdata.txt', 'w', encoding='utf-8') as f:
+    with open('trainingdata2.txt', 'w', encoding='utf-8') as f:
         f.write('\n\n'.join(training_data))
     
     total_time = time.time() - start_time
-    print(f"\n✅ Done! Created trainingdata.txt with {len(training_data)} examples")
+    print(f"\n✅ Done! Created trainingdata2.txt with {len(training_data)} examples")
     print(f"⏰ Total processing time: {total_time/60:.1f} minutes")
 
 if __name__ == "__main__":
